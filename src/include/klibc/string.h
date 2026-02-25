@@ -1,0 +1,18 @@
+#include <klibc/types.h>
+#ifndef _STRING_H
+#define _STRING_H
+
+size_t strlen(const char *str);
+char *strcpy(char *dest, const char *src);
+char *strncpy(char *dest, const char *src, size_t n);
+char *strcat(char *dest, const char *str);
+void *memcpy(void *dest, const void *src, size_t size);
+void *memset(void *dest, int what, size_t size);
+int strcmp(const char *a, const char *b);
+int strncmp(const char *a, const char *b, size_t c);
+int memcmp(const void *a, const void *b, size_t s);
+void *memmove(void *_d, const void *_s, size_t c);
+char *strerror(int errno);
+long long atoll(const char *c);
+
+#endif
