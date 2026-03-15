@@ -184,8 +184,6 @@ void kmain(void) {
 
     __asm__ volatile("sti");
 
-    sleep_ms(5000);
-
     shell_init();
 
     for (;;) {
