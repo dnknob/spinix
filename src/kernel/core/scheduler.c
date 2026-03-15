@@ -749,7 +749,8 @@ void scheduler_dump_tasks(void) {
 
 void idle_task_entry(void) {
     for (;;) {
-        __asm__ volatile("hlt");
+        __asm__ volatile("sti; hlt");
+	yield();
     }
 }
 
