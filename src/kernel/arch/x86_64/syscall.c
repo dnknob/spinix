@@ -54,6 +54,17 @@ void syscall_init(void)
     eend(0, NULL);
 }
 
+#define F_DUPFD         0
+#define F_GETFD         1
+#define F_SETFD         2
+#define F_GETFL         3
+#define F_SETFL         4
+#define F_DUPFD_CLOEXEC 1030
+
+#define FD_CLOEXEC      1
+
+#define FCNTL_SETFL_MASK  (VFS_O_APPEND | VFS_O_NONBLOCK)
+
 #define STDIN_BUF_SIZE  512
 #define STDIN_BUF_MASK  (STDIN_BUF_SIZE - 1)
 
@@ -624,7 +635,6 @@ static int64_t sys_dup2(uint64_t oldfd, uint64_t newfd)
 {
     if (oldfd >= PROC_MAX_FDS) return -9LL;     /* -EBADF */
     if (newfd >= PROC_MAX_FDS) return -9LL;     /* -EBADF */
-    if (newfd < 3)             return -9LL;     /* never clobber stdio */
 
     pcb_t *proc = proc_get_current();
     if (proc == NULL) return -9LL;
@@ -633,6 +643,8 @@ static int64_t sys_dup2(uint64_t oldfd, uint64_t newfd)
     if (old_fde == NULL) return -9LL;           /* -EBADF */
 
     if (oldfd == newfd) return (int64_t)newfd;
+
+    if (newfd < 3)      return -9LL;            /* never clobber stdio */
 
     file_descriptor_t *existing = proc_fd_get(proc, (int)newfd);
     if (existing != NULL) {
@@ -665,6 +677,122 @@ static int64_t sys_dup2(uint64_t oldfd, uint64_t newfd)
 
     proc->stats.syscalls++;
     return (int64_t)newfd;
+}
+
+static int fcntl_dup_fd(pcb_t *proc, file_descriptor_t *src_fde,
+                        int min_fd, bool set_cloexec)
+{
+    int newfd = -1;
+    for (int i = min_fd; i < PROC_MAX_FDS; i++) {
+        if (proc->fd_table[i] == NULL) { newfd = i; break; }
+    }
+    if (newfd < 0) return -24;      /* -EMFILE */
+
+    file_descriptor_t *new_fde =
+        (file_descriptor_t *)kmalloc(sizeof(file_descriptor_t));
+    if (new_fde == NULL) return -12; /* -ENOMEM */
+
+    new_fde->file     = src_fde->file;
+    new_fde->offset   = 0;
+    new_fde->refcount = 1;
+
+    uint32_t flags = src_fde->flags & ~(uint32_t)VFS_O_CLOEXEC;
+    if (set_cloexec) flags |= VFS_O_CLOEXEC;
+    new_fde->flags = flags;
+
+    if (new_fde->file != NULL)
+        __sync_fetch_and_add(&((vfs_file_t *)new_fde->file)->f_refcount, 1);
+
+    if (proc_fd_install(proc, newfd, new_fde) != 0) {
+        if (new_fde->file != NULL)
+            __sync_fetch_and_sub(&((vfs_file_t *)new_fde->file)->f_refcount, 1);
+        kfree(new_fde);
+        return -9;      /* -EBADF */
+    }
+    return newfd;
+}
+
+static int64_t sys_fcntl(uint64_t fd, uint64_t cmd, uint64_t arg)
+{
+    if (fd >= PROC_MAX_FDS)
+        return -9;      /* -EBADF */
+ 
+    pcb_t *proc = proc_get_current();
+    if (proc == NULL)
+        return -9;
+ 
+    file_descriptor_t *fde = proc_fd_get(proc, (int)fd);
+    if (fde == NULL)
+        return -9;      /* -EBADF: fd not open */
+ 
+    proc->stats.syscalls++;
+ 
+    switch ((int)cmd) {
+ 
+    case F_DUPFD: {
+        int min_fd = (int)arg;
+        if (min_fd < 0 || min_fd >= PROC_MAX_FDS)
+            return -22; /* -EINVAL */
+ 
+        if (min_fd < 3)
+            min_fd = 3;
+ 
+        return (int64_t)fcntl_dup_fd(proc, fde, min_fd, false);
+    }
+ 
+    case F_DUPFD_CLOEXEC: {
+        int min_fd = (int)arg;
+        if (min_fd < 0 || min_fd >= PROC_MAX_FDS)
+            return -22;
+        if (min_fd < 3)
+            min_fd = 3;
+        return (int64_t)fcntl_dup_fd(proc, fde, min_fd, true);
+    }
+ 
+    case F_GETFD:
+        return (fde->flags & VFS_O_CLOEXEC) ? FD_CLOEXEC : 0;
+ 
+    case F_SETFD:
+        lock_scheduler();
+        if (arg & FD_CLOEXEC)
+            fde->flags |=  VFS_O_CLOEXEC;
+        else
+            fde->flags &= ~(uint32_t)VFS_O_CLOEXEC;
+        unlock_scheduler();
+        return 0;
+ 
+    case F_GETFL: {
+        /* For stdio sentinels (fde->file == NULL) return the flags we
+         * stored directly in the descriptor at stdin_init time. */
+        if (fde->file == NULL)
+            return (int64_t)(fde->flags & ~(uint32_t)VFS_O_CLOEXEC);
+ 
+        vfs_file_t *vfile = (vfs_file_t *)fde->file;
+        /* Return the live flags from the open file description.
+         * Strip VFS_O_CLOEXEC — that is a *descriptor* flag, invisible here. */
+        return (int64_t)(vfile->f_flags & ~(uint32_t)VFS_O_CLOEXEC);
+    }
+ 
+    case F_SETFL: {
+        uint32_t new_bits = (uint32_t)arg & FCNTL_SETFL_MASK;
+
+        if (fde->file == NULL) {
+            lock_scheduler();
+            fde->flags = (fde->flags & ~FCNTL_SETFL_MASK) | new_bits;
+            unlock_scheduler();
+            return 0;
+        }
+
+        vfs_file_t *vfile = (vfs_file_t *)fde->file;
+        lock_scheduler();
+        vfile->f_flags = (vfile->f_flags & ~FCNTL_SETFL_MASK) | new_bits;
+        unlock_scheduler();
+        return 0;
+    }
+ 
+    default:
+        return -22;     /* -EINVAL: unknown command */
+    }
 }
 
 static int64_t sys_getdents64(uint64_t fd, uint64_t buf_addr, uint64_t count)
@@ -946,6 +1074,7 @@ uint64_t syscall_dispatch(uint64_t num,
     case SYS_LSEEK:         return (uint64_t)sys_lseek(a1, (int64_t)a2, a3);
     case SYS_DUP:  return (uint64_t)sys_dup(a1);
     case SYS_DUP2: return (uint64_t)sys_dup2(a1, a2);
+    case SYS_FCNTL: return (uint64_t)sys_fcntl(a1, a2, a3);
     case SYS_MMAP:          return sys_mmap(a1, a2, a3, a4, a5, a6);
     case SYS_MUNMAP:        return (uint64_t)sys_munmap(a1, a2);
     case SYS_BRK:           return sys_brk(a1);

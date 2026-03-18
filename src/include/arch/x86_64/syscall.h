@@ -19,6 +19,7 @@
 #define SYS_DUP2            33
 #define SYS_GETPID          39
 #define SYS_EXIT            60
+#define SYS_FCNTL           72
 #define SYS_GETCWD          79
 #define SYS_CHDIR           80
 #define SYS_MKDIR           83
