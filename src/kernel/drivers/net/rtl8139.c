@@ -10,6 +10,7 @@
 #include <mm/pmm.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <klibc/string.h>
 
@@ -105,9 +106,10 @@ static void rtl8139_irq_handler(struct interrupt_frame *frame)
 
 int rtl8139_init(void)
 {
+    ebegin("Starting rtl8139 network driver");
     pci_device_t *pdev = pci_find_device(RTL8139_VENDOR_ID, RTL8139_DEVICE_ID);
     if (!pdev) {
-        printk("rtl8139: device not found\n");
+        eend(-1, "rtl8139: device not found");
         return -1;
     }
 
@@ -116,7 +118,7 @@ int rtl8139_init(void)
 
     pci_read_bar(pdev, 0);
     if (!(pdev->bar[0] & PCI_BAR_TYPE_IO)) {
-        printk("rtl8139: BAR0 is not I/O space (bar=0x%08x)\n", pdev->bar[0]);
+        eerror("rtl8139: BAR0 is not I/O space (bar=0x%08x)\n", pdev->bar[0]);
         return -1;
     }
     g_rtl.io_base = (uint16_t)(pdev->bar[0] & 0xFFFFFFFC);
@@ -131,21 +133,21 @@ int rtl8139_init(void)
 
     rtl_w8(RTL_CHIPCMD, RTL_CMD_RESET);
     if (rtl_wait_cmd(RTL_CMD_RESET, 0, 100000) < 0) {
-        printk("rtl8139: reset timed out\n");
+        eerror("rtl8139: reset timed out\n");
         return -1;
     }
 
     for (int i = 0; i < 6; i++)
         g_rtl.mac[i] = rtl_r8(RTL_MAC0 + i);
 
-    printk("rtl8139: MAC %02x:%02x:%02x:%02x:%02x:%02x\n",
+    veinfo("rtl8139: MAC %02x:%02x:%02x:%02x:%02x:%02x\n",
            g_rtl.mac[0], g_rtl.mac[1], g_rtl.mac[2],
            g_rtl.mac[3], g_rtl.mac[4], g_rtl.mac[5]);
 
     size_t rx_pages = BYTES_TO_PAGES(RTL_RX_BUF_SIZE);
     g_rtl.rx_buf_phys = pmm_alloc_pages(rx_pages, PMM_ZONE_DMA32);
     if (!g_rtl.rx_buf_phys) {
-        printk("rtl8139: failed to allocate RX buffer\n");
+        eerror("rtl8139: failed to allocate RX buffer\n");
         return -1;
     }
     g_rtl.rx_buf_virt = (uint8_t *)PHYS_TO_VIRT(g_rtl.rx_buf_phys);
@@ -155,7 +157,7 @@ int rtl8139_init(void)
     for (int i = 0; i < RTL_TX_DESC_COUNT; i++) {
         g_rtl.tx_buf_phys[i] = pmm_alloc_page_zone(PMM_ZONE_DMA32);
         if (!g_rtl.tx_buf_phys[i]) {
-            printk("rtl8139: failed to allocate TX buffer %d\n", i);
+            eerror("rtl8139: failed to allocate TX buffer %d\n", i);
             return -1;
         }
         g_rtl.tx_buf_virt[i] = (uint8_t *)PHYS_TO_VIRT(g_rtl.tx_buf_phys[i]);
@@ -198,10 +200,10 @@ int rtl8139_init(void)
                        0);   /* destination = APIC ID 0 (BSP) */
 
     g_rtl.link_up = !(rtl_r8(RTL_MEDIASTATUS) & RTL_MSR_LINKB);
-    printk("rtl8139: link %s\n", g_rtl.link_up ? "up" : "down");
+    veinfo("rtl8139: link %s\n", g_rtl.link_up ? "up" : "down");
 
     g_rtl_ready = true;
-    printk("rtl8139: initialised ok\n");
+    eend(0, NULL);
     return 0;
 }
 

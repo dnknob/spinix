@@ -43,6 +43,9 @@
 #define PROC_SIG_DFL            ((void (*)(int))0)
 #define PROC_SIG_IGN            ((void (*)(int))1)
 
+struct vm_space;
+typedef struct vm_space vm_space_t;
+
 typedef struct wait_queue_entry {
     tcb_t *thread;
     uint64_t wake_reason;
@@ -68,6 +71,7 @@ typedef struct signal_handler {
     void (*handler)(int);
     uint64_t mask;
     uint32_t flags;
+    uint64_t restorer;
 } signal_handler_t;
 
 typedef struct proc_cred {
@@ -115,6 +119,9 @@ typedef struct pcb {
     uint64_t user_rflags;       /* RFLAGS for ring-3 entry (IF set)       */
     uint64_t user_stack_virt;   /* virtual base of user stack allocation  */
     uint64_t user_stack_size;   /* size of user stack (bytes)             */
+    
+    uint64_t heap_base;         /* virtual address of heap start (post-ELF load) */
+    uint64_t heap_brk;          /* current program break                         */
 
     time_t   time_created_ns;
     clock_t  cpu_time_ns;
@@ -129,7 +136,7 @@ typedef struct pcb {
 
     proc_cred_t cred;
 
-    file_descriptor_t *fd_table[PROC_MAX_FDS];
+    file_descriptor_t **fd_table;
     uint32_t next_fd;
     char     cwd[PROC_CWD_LEN];
 
@@ -150,6 +157,7 @@ typedef struct pcb {
     uint64_t rss;
 
     uint32_t flags;
+
 #define PROC_FLAG_KERNEL    (1 << 0)  /* runs entirely in ring 0           */
 #define PROC_FLAG_TRACED    (1 << 1)  /* being traced (ptrace)             */
 #define PROC_FLAG_EXITING   (1 << 2)  /* in process of exiting             */
@@ -166,6 +174,11 @@ pcb_t *proc_create_child(pcb_t *parent, const char *name,
 
 pcb_t *proc_create_user(const char *name, uint64_t entry,
                         uint64_t user_stack_top, uint8_t priority);
+
+pcb_t *proc_create_user_with_space(const char *name, uint64_t entry,
+                                   uint64_t user_stack_top,
+                                   uint8_t priority,
+                                   vm_space_t *space);
 
 void proc_exit(int exit_code);
 void proc_terminate(pcb_t *proc, int exit_code);
@@ -186,6 +199,7 @@ pid_t  proc_getsid(pcb_t *proc);
 
 void waitq_init(wait_queue_t *wq);
 void waitq_add(wait_queue_t *wq, tcb_t *thread);
+pcb_t *proc_fork(uint64_t user_rip, uint64_t user_rsp, uint64_t user_rflags);
 void waitq_remove(wait_queue_t *wq, tcb_t *thread);
 void waitq_wake_one(wait_queue_t *wq, uint64_t reason, void *data);
 void waitq_wake_all(wait_queue_t *wq, uint64_t reason, void *data);

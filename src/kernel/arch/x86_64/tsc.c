@@ -3,6 +3,7 @@
 #include <arch/x86_64/io.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -222,7 +223,7 @@ bool tsc_calibrate_apic(uint64_t apic_frequency_hz) {
         return false;
 
     calibration_method = TSC_CALIB_APIC;
-    printk("tsc: APIC calibration successful\n");
+    veinfo("tsc: APIC calibration successful");
 
     return true;
 }
@@ -243,9 +244,11 @@ const char *tsc_get_calibration_method_name(void) {
 }
 
 void tsc_init(void) {
+    ebegin("Calibrating TSC");
+
     tsc_available = tsc_is_supported();
     if (!tsc_available) {
-        printk("tsc: not supported by CPU\n");
+        ewarn("tsc: not supported by CPU");
         return;
     }
 
@@ -267,13 +270,18 @@ void tsc_init(void) {
         goto calibration_done;
     }
     
-    printk("tsc: All calibration methods failed, using fallback\n");
+    ewarn("tsc: all calibration methods failed, using fallback");
     tsc_frequency = 2400000000ULL;  /* 2.4 GHz fallback */
     calibration_method = TSC_CALIB_FALLBACK;
 
 calibration_done:
-    printk("tsc: initialized (%lu MHz)\n", tsc_frequency / 1000000);
+
     tsc_boot = rdtsc();
+    
+    eindent();
+        veinfo("TSC frequency: %lu MHz", tsc_frequency / 1000000);
+    eoutdent();
+    eend(0, NULL);
 }
 
 uint64_t tsc_get_frequency(void) {

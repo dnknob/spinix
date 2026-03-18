@@ -5,6 +5,7 @@
 #include <mm/pmm.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <klibc/string.h>
 
@@ -76,9 +77,8 @@ void paging_init(void) {
     kernel_context.mmu_ctx = mmu_ctx;
     
     if (paging_identity_map(&kernel_context, 0, 16 * 1024 * 1024, PAGE_FLAGS_KERNEL) != 0) {
-        printk("paging: warning: failed to identity map low memory\n");
+        ewarn("paging: failed to identity map low memory");
     }
-    printk_ts("paging: initialized\n");
 }
 
 paging_context_t *paging_get_kernel_context(void) {

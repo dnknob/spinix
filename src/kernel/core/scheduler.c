@@ -12,6 +12,7 @@
 #include <mm/paging.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <klibc/string.h>
 
@@ -219,7 +220,7 @@ tcb_t *create_kernel_task(void (*entry_point)(void), const char *name, uint8_t p
     /* Allocate TCB */
     tcb_t *task = (tcb_t *)kmalloc(sizeof(tcb_t));
     if (task == NULL) {
-        printk("sched: failed to allocate TCB\n");
+        eerror("sched: failed to allocate TCB\n");
         return NULL;
     }
 
@@ -227,7 +228,7 @@ tcb_t *create_kernel_task(void (*entry_point)(void), const char *name, uint8_t p
 
     void *stack = kmalloc(KERNEL_STACK_SIZE);
     if (stack == NULL) {
-        printk("sched: failed to allocate kernel stack\n");
+        eerror("sched: failed to allocate kernel stack\n");
         kfree(task);
         return NULL;
     }
@@ -755,6 +756,8 @@ void idle_task_entry(void) {
 }
 
 void scheduler_init(void) {
+    ebegin("Starting scheduler");
+
     if (scheduler_initialized) {
         printk("sched: already initialized\n");
         return;
@@ -768,7 +771,7 @@ void scheduler_init(void) {
 
     tcb_t *boot_task = (tcb_t *)kmalloc(sizeof(tcb_t));
     if (boot_task == NULL) {
-        printk("sched: failed to allocate boot task TCB!\n");
+        epanic("sched", "failed to allocate boot task TCB");
         for (;;) __asm__("hlt");
     }
 
@@ -806,7 +809,7 @@ void scheduler_init(void) {
 
     idle_task = create_kernel_task(idle_task_entry, "idle", PRIORITY_IDLE);
     if (idle_task == NULL) {
-        printk("sched: failed to create idle task!\n");
+        epanic("sched", "failed to create idle task");
         for (;;) __asm__("hlt");
     }
 
@@ -828,5 +831,5 @@ void scheduler_init(void) {
 
     scheduler_initialized = 1;
 
-    printk_ts("sched: initialized\n");
+    eend(0, NULL);
 }

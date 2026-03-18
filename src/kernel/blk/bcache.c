@@ -5,6 +5,7 @@
 #include <mm/heap.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <klibc/string.h>
 #include <errno.h>
@@ -75,14 +76,14 @@ void bcache_init(void)
         
         b->data = kmalloc(BSIZE);
         if (b->data == NULL) {
-            printk("bcache: failed to allocate buffer %d\n", i);
+            eerror("bcache: failed to allocate buffer %d", i);
             continue;
         }
         
         b->lock_data = kmalloc(sizeof(spinlock_irq_t));
         if (b->lock_data == NULL) {
             kfree(b->data);
-            printk("bcache: failed to allocate lock for buffer %d\n", i);
+            eerror("bcache: failed to allocate lock for buffer %d", i);
             continue;
         }
         spinlock_irq_init((spinlock_irq_t *)b->lock_data);
@@ -109,9 +110,6 @@ void bcache_init(void)
     bcache.evictions = 0;
     bcache.writes = 0;
     bcache.reads = 0;
-    
-    printk_ts("bcache: initialized with %d buffers (%d KB total)\n",
-           NBUF, (NBUF * BSIZE) / 1024);
 }
 
 static struct buf *bcache_lookup(struct blk_device *dev, uint64_t blockno)
@@ -224,7 +222,7 @@ struct buf *bread(struct blk_device *dev, uint64_t blockno)
     if (b == NULL) {
         /* No buffer available - all are in use */
         spinlock_irq_release(&bcache.lock);
-        printk("bcache: out of buffers!\n");
+        ewarn("bcache: out of buffers");
         return NULL;
     }
     

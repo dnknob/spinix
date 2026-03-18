@@ -6,6 +6,7 @@
 #include <arch/x86_64/io.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <stddef.h>
 #include <stdbool.h>
@@ -242,8 +243,7 @@ void kb_update_leds_sync(void) {
 }
 
 void kb_init(void) {
-    printk_ts("kb: initializing PS/2 keyboard driver\n");
-
+    ebegin("Starting PS/2 keyboard driver");
     int n = 0;
     while ((inb(KB_STATUS_PORT) & KB_STATUS_OUTPUT_FULL) && n++ < 16) {
         inb(KB_DATA_PORT);
@@ -255,7 +255,7 @@ void kb_init(void) {
     uint8_t apic_id = (uint8_t)apic_get_id();
     int result = ioapic_map_isa_irq(KB_IRQ, KB_IRQ_VECTOR, apic_id);
     if (result != 0) {
-        printk("kb: failed to configure IOAPIC for IRQ1\n");
+        eerror("kb: failed to configure IOAPIC for IRQ1");
         return;
     }
 
@@ -263,7 +263,7 @@ void kb_init(void) {
     ioapic_mask_irq(gsi);
 
     if (!kb_send_command(KB_CMD_ENABLE))
-        printk("kb: warning: keyboard did not ACK enable\n");
+        ewarn("kb: keyboard did not ACK enable");
 
     kb_set_leds(0);
 
@@ -275,6 +275,9 @@ void kb_init(void) {
 
     ioapic_unmask_irq(gsi);
 
-    printk("kb: PS/2 keyboard ready (IRQ%d -> vector %d)\n",
-           KB_IRQ, KB_IRQ_VECTOR);
+    eindent();
+        veinfo("kb: PS/2 keyboard ready (IRQ%d -> vector %d)\n",
+            KB_IRQ, KB_IRQ_VECTOR);
+    eoutdent();
+    eend(0, NULL);
 }

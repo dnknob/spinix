@@ -1,3 +1,4 @@
+#include <arch/x86_64/syscall.h>
 #include <arch/x86_64/serial.h>
 #include <arch/x86_64/cpuid.h>
 #include <arch/x86_64/ioapic.h>
@@ -22,14 +23,17 @@
 #include <blk/bcache.h>
 #include <blk/blk.h>
 
+#include <fs/elf_abi.h>
 #include <fs/tmpfs.h>
 #include <fs/sysfs.h>
 #include <fs/sysdir.h>
+#include <fs/runit.h>
 #include <fs/vfs.h>
 
 #include <video/flanterm.h>
 #include <video/fb.h>
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <mm/paging.h>
 #include <mm/heap.h>
@@ -41,8 +45,6 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <limine.h>
-
-#include "shell.h"
 
 __attribute__((used, section(".limine_requests")))
 static volatile uint64_t limine_base_revision[] =
@@ -78,18 +80,8 @@ struct flanterm_context *g_ft_ctx = NULL;
 
 void fpu_enable(void);
 
-void kb_callback(kb_event_t *event) {
-    if (!event->pressed) return;
-
-    if (event->keycode == KEY_BACKSPACE) {
-        printk("\b \b");
-        return;
-    }
-
-    if (event->keycode != 0) {
-        printk("%c", event->keycode);
-    }
-}
+extern const uint8_t _binary_bin_hello_start[];
+extern const uint8_t _binary_bin_hello_end[];
 
 void kmain(void) {
     if (!LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision))
@@ -126,20 +118,38 @@ void kmain(void) {
 
     g_ft_ctx = ft_ctx;
 
-    printk("display: %llux%llu\n", width, height);
+    elog_header("Booting spinix 0.1.0 (x86_64) ...");
 
     __asm__ volatile("cli");
-
     fpu_enable();
 
+    ebegin("Starting GDT");
     gdt_init();
-    idt_init();
+    eend(0, NULL);
 
+    ebegin("Starting IDT");
+    idt_init();
+    eend(0, NULL);
+
+    ebegin("Starting physical memory manager");
     pmm_init();
+    eend(0, NULL);
+
+    ebegin("Starting MMU");
     mmu_init();
+    eend(0, NULL);
+
+    ebegin("Starting virtual memory manager");
     vmm_init();
+    eend(0, NULL);
+
+    ebegin("Starting kernel heap");
     heap_init();
+    eend(0, NULL);
+
+    ebegin("Starting paging");
     paging_init();
+    eend(0, NULL);
 
     serial_init(COM1);
 
@@ -153,38 +163,59 @@ void kmain(void) {
     rtc_init();
     tsc_init();
 
+    ebegin("Scanning PCI bus");
     pci_init();
-    printk_ts("devices: PCI scan complete\n");
+    eend(0, NULL);
 
     kb_init();
-    kb_set_callback(kb_callback);
+    stdin_init();
 
+    ebegin("Starting block device layer");
     blk_init();
+    eend(0, NULL);
+
+    ebegin("Starting buffer cache");
     bcache_init();
+    eend(0, NULL);
+
+    ebegin("Starting AHCI storage driver");
     ata_init();
     ahci_init();
+    eend(0, NULL);
 
     scheduler_init();
     proc_init();
+    syscall_init();
 
     uint64_t apic_freq     = apic_timer_get_frequency();
     uint32_t initial_count = (apic_freq / 16) / 100;
     apic_timer_init(IRQ0, LAPIC_TIMER_DIV_16, initial_count, true);
 
+    ebegin("Starting virtual filesystem");
     vfs_init();
     tmpfs_init();
     vfs_mount(NULL, "/", "tmpfs", 0);
+    eend(0, NULL);
 
+    ebegin("Starting sysfs");
     sysfs_init();
+    eend(0, NULL);
+
+    ebegin("Starting sysdir");
     sysdir_init();
+    eend(0, NULL);
+
+    RUNIT_EMBED(test, "/bin/test");
+    runit_install("/bin/test",
+                  runit_test.start,
+                  (size_t)(runit_test.end - runit_test.start));
+    runit("/bin/test", "test", PRIORITY_NORMAL, NULL);
 
     rtl8139_rx_handler = NULL;
     rtl8139_init();
     eth_init();
 
     __asm__ volatile("sti");
-
-    shell_init();
 
     for (;;) {
         yield();

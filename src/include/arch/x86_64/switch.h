@@ -4,6 +4,8 @@
 #include <core/scheduler.h>
 
 extern void switch_to_task_asm(tcb_t *next_task);
+extern void enter_userspace(uint64_t rip, uint64_t rsp, uint64_t rflags);
+
 void switch_to_task(tcb_t *next_task);
 
 void task_startup_wrapper(void);

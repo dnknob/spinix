@@ -5,6 +5,7 @@
 #include <mm/pmm.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <klibc/string.h>
 
@@ -146,7 +147,7 @@ static slab_t *slab_create(heap_slab_cache_t *cache) {
 
 heap_slab_cache_t *heap_create_slab_cache(const char *name, size_t obj_size, size_t align) {
     if (obj_size > SLAB_MAX_SIZE || obj_size < SLAB_MIN_SIZE) {
-        printk("heap: invalid slab object size %lu\n", obj_size);
+        ewarn("heap: invalid slab object size %lu", obj_size);
         return NULL;
     }
     
@@ -356,21 +357,22 @@ static void coalesce_blocks(heap_block_t *block) {
     /* Forward coalesce */
     uint8_t *block_end = (uint8_t *)(block + 1) + block->size;
     heap_block_t *next_block = (heap_block_t *)block_end;
-    
+
     if ((uint64_t)next_block < heap_state.heap_end &&
         next_block->magic == HEAP_MAGIC_FREE) {
-        
+
+        remove_from_free_list(next_block);   /* next_block IS in the list */
         block->size += sizeof(heap_block_t) + next_block->size;
-        remove_from_free_list(next_block);
         heap_state.coalesce_ops++;
     }
-    
-    if (block->phys_prev != NULL && block->phys_prev->magic == HEAP_MAGIC_FREE) {
+
+    if (block->phys_prev != NULL &&
+        block->phys_prev->magic == HEAP_MAGIC_FREE) {
+
         heap_block_t *prev_block = block->phys_prev;
-        
+        remove_from_free_list(prev_block);   /* prev_block IS in the list */
+        /* do NOT call remove_from_free_list(block) */
         prev_block->size += sizeof(heap_block_t) + block->size;
-        remove_from_free_list(block);
-        remove_from_free_list(prev_block);
         add_to_free_list(prev_block);
         heap_state.coalesce_ops++;
     }
@@ -403,7 +405,7 @@ static int heap_expand(size_t min_size) {
     size_t expand_size = ALIGN_UP(min_size, HEAP_EXPAND_SIZE);
     
     if (heap_state.total_size + expand_size > HEAP_MAX_SIZE) {
-        printk("heap: cannot expand beyond maximum size\n");
+        ewarn("heap: cannot expand beyond maximum size");
         return -1;
     }
     
@@ -461,7 +463,7 @@ void heap_init(void) {
     );
     
     if (heap_region == 0) {
-        printk("heap: failed to allocate initial heap!\n");
+        epanic("heap", "failed to allocate initial heap");
         for (;;) __asm__("hlt");
     }
     
@@ -488,8 +490,6 @@ void heap_init(void) {
     
     heap_state.initialized = 1;
     heap_state.guards_enabled = 0;  /* Disabled by default for performance */
-    
-    printk_ts("heap: initialized\n");
 }
 
 void *kmalloc_flags(size_t size, uint32_t flags) {

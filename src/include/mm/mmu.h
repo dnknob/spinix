@@ -75,6 +75,7 @@ phys_addr_t mmu_virt_to_phys(mmu_context_t *ctx, virt_addr_t virt_addr);
 int         mmu_is_mapped(mmu_context_t *ctx, virt_addr_t virt_addr);
 
 uint64_t mmu_get_flags(mmu_context_t *ctx, virt_addr_t virt_addr);
+uint64_t mmu_get_pml4_phys(mmu_context_t *ctx);
 void     mmu_dump_tables(mmu_context_t *ctx, virt_addr_t virt_addr);
 void     mmu_print_stats(void);
 

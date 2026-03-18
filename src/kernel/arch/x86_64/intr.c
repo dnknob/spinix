@@ -3,8 +3,12 @@
 #include <arch/x86_64/io.h>
 
 #include <core/scheduler.h>
+#include <core/proc.h>
+
+#include <mm/vmm.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <stdint.h>
 #include <stddef.h>
@@ -65,8 +69,7 @@ void dump_registers(struct interrupt_frame *frame) {
 }
 
 noreturn void kernel_panic(const char *message) {
-    printk("\n*** KERNEL PANIC: %s ***\n", message);
-    printk("System halted.\n");
+    epanic("intr", message);
     for (;;) {
         __asm__ volatile ("cli; hlt");
     }
@@ -76,31 +79,47 @@ noreturn void kernel_panic(const char *message) {
 void interrupt_handler(struct interrupt_frame *frame) {
     uint64_t int_no = frame->int_no;
 
+    if (int_no == 14) {
+        uint64_t cr2;
+        __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+
+        pcb_t *proc = proc_get_current();
+        vm_space_t *space = (proc != NULL) ? (vm_space_t *)proc->vm_space : NULL;
+
+        if (space != NULL) {
+            int ret = vmm_handle_page_fault(space, cr2, frame->err_code);
+            if (ret == 0)
+                return;
+        }
+
+        printk("\n*** CPU EXCEPTION: Page Fault (#14) ***\n");
+        dump_registers(frame);
+        kernel_panic("Unrecoverable page fault");
+    }
+
     if (int_no < 32) {
         printk("\n*** CPU EXCEPTION: %s (#%llu) ***\n",
                int_no < 22 ? exception_messages[int_no] : "Unknown",
                int_no);
-        
-        if (int_no == 8) {
+
+        if (int_no == 8)
             printk("Double fault detected - possible stack corruption\n");
-        }
-        
+
         dump_registers(frame);
         kernel_panic("Unrecoverable exception");
     }
 
     if (int_no >= 32 && int_no < 48) {
         int irq = int_no - 32;
-        
-        if (irq_handlers[irq]) {
+
+        if (irq_handlers[irq])
             irq_handlers[irq](frame);
-        }
-        
+
         if (irq == 0) {
             if (scheduler_is_initialized())
                 scheduler_timer_tick();
         }
-        
+
         apic_eoi();
         return;
     }
@@ -111,7 +130,7 @@ void interrupt_handler(struct interrupt_frame *frame) {
 void irq_install_handler(int irq, irq_handler_fn handler) {
     if (irq >= 0 && irq < 16) {
         irq_handlers[irq] = handler;
-        printk("irq: Installed handler for IRQ%d\n", irq);
+        veinfo("irq: Installed handler for IRQ%d", irq);
     }
 }
 

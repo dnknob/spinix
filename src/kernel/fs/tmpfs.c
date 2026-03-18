@@ -6,6 +6,7 @@
 #include <mm/heap.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <klibc/string.h>
 #include <errno.h>
@@ -236,7 +237,7 @@ int tmpfs_mount(struct blk_device *dev, uint32_t flags, vfs_mount_t **mount_out)
 
     *mount_out = mount;
 
-    printk("tmpfs: mounted successfully\n");
+    veinfo("tmpfs: mounted successfully");
     return 0;
 }
 
@@ -945,10 +946,10 @@ static const vfs_filesystem_ops_t tmpfs_fs_ops = {
 int tmpfs_init(void) {
     int ret = vfs_register_filesystem(&tmpfs_fs_ops);
     if (ret != 0) {
-        printk("tmpfs: failed to register filesystem: %d\n", ret);
+        eerror("tmpfs: failed to register filesystem: %d", ret);
         return ret;
     }
 
-    printk("tmpfs: registered filesystem type\n");
+    veinfo("tmpfs: registered filesystem type");
     return 0;
 }

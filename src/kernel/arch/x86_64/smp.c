@@ -7,6 +7,7 @@
 #include <mm/heap.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <klibc/string.h>
 
@@ -190,8 +191,10 @@ void smp_init(void)
 {
     struct limine_mp_response *resp = smp_mp_request.response;
 
+    ebegin("Bringing up secondary CPUs");
+
     if (!resp || resp->cpu_count == 0) {
-        printk("smp: no Limine MP response — uniprocessor\n");
+        ewarn("smp: no Limine MP response, running uniprocessor");
         cpu_info_t *bsp = smp_alloc_cpu_info(0, apic_get_id(), true);
         if (bsp) {
             g_cpus[0]     = bsp;
@@ -205,7 +208,7 @@ void smp_init(void)
     if (total > SMP_MAX_CPUS)
         total = SMP_MAX_CPUS;
 
-    printk("smp: %llu CPU(s) detected, BSP LAPIC ID = %u\n",
+    veinfo("smp: %llu CPU(s) detected, BSP LAPIC ID = %u",
            total, resp->bsp_lapic_id);
 
     uint32_t next_id = 0;
@@ -216,7 +219,7 @@ void smp_init(void)
 
         cpu_info_t *bsp = smp_alloc_cpu_info(next_id, mi->lapic_id, true);
         if (!bsp) {
-            printk("smp: FATAL: failed to allocate BSP cpu_info\n");
+            epanic("smp", "failed to allocate BSP cpu_info");
             return;
         }
         g_cpus[next_id] = bsp;
@@ -234,7 +237,7 @@ void smp_init(void)
 
         cpu_info_t *cpu = smp_alloc_cpu_info(next_id, mi->lapic_id, false);
         if (!cpu) {
-            printk("smp: failed to alloc cpu_info for LAPIC %u\n", mi->lapic_id);
+            ewarn("smp: failed to alloc cpu_info for LAPIC %u", mi->lapic_id);
             continue;
         }
 
@@ -242,7 +245,7 @@ void smp_init(void)
         next_id++;
         __atomic_store_n(&g_cpu_count, next_id, __ATOMIC_RELEASE);
 
-        printk("smp: waking CPU %u (LAPIC %u)\n", cpu->cpu_id, cpu->lapic_id);
+        veinfo("smp: waking CPU %u (LAPIC %u)", cpu->cpu_id, cpu->lapic_id);
 
         mi->extra_argument = (uint64_t)cpu->stack_top;
         __asm__ volatile("" ::: "memory");
@@ -257,15 +260,16 @@ void smp_init(void)
         }
 
         if (!cpu->online)
-            printk("smp: WARNING: CPU %u (LAPIC %u) timed out\n",
+            ewarn("smp: CPU %u (LAPIC %u) timed out",
                    cpu->cpu_id, cpu->lapic_id);
         else
-            printk("smp: CPU %u (LAPIC %u) online\n",
+            veinfo("smp: CPU %u (LAPIC %u) online",
                    cpu->cpu_id, cpu->lapic_id);
     }
-
-    __asm__ volatile("" ::: "memory");
-    printk_ts("smp: %u/%u CPU(s) online\n", g_cpus_online, g_cpu_count);
+    eindent();
+        veinfo("%u/%u CPUs online", g_cpus_online, g_cpu_count);
+    eoutdent();
+    eend(0, NULL);
 }
 
 cpu_info_t *smp_get_cpu(uint32_t cpu_id)

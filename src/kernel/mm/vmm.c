@@ -3,6 +3,7 @@
 #include <mm/vmm.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <core/spinlock.h>
 
@@ -192,7 +193,6 @@ void vmm_init(void) {
     kernel_space.area_count = 0;
 
     vmm_initialized = 1;
-    printk_ts("vmm: initialized\n");
 }
 
 vm_space_t *vmm_get_kernel_space(void) {
@@ -271,7 +271,7 @@ static int vmm_map_region_internal(vm_space_t *space, uint64_t virt_addr, size_t
     }
 
     if (!vmm_is_canonical_addr(virt_addr)) {
-        printk("vmm: non-canonical address 0x%016lx\n", virt_addr);
+        ewarn("vmm: non-canonical address 0x%016lx", virt_addr);
         return -1;
     }
 
@@ -286,7 +286,7 @@ static int vmm_map_region_internal(vm_space_t *space, uint64_t virt_addr, size_t
     vm_area_t *area = space->areas;
     while (area != NULL) {
         if (!(virt_end <= area->virt_start || virt_start >= area->virt_end)) {
-            printk("vmm: Region 0x%016lx-0x%016lx overlaps existing region\n",
+            ewarn("vmm: region 0x%016lx-0x%016lx overlaps existing region",
                    virt_start, virt_end);
             return -1;
         }
@@ -506,7 +506,7 @@ int vmm_handle_page_fault(vm_space_t *space, uint64_t virt_addr,
 
     vm_area_t *area = vmm_find_area(space, virt_addr);
     if (area == NULL) {
-        printk("vmm: Page fault at 0x%016lx - no area found\n", virt_addr);
+        ewarn("vmm: page fault at 0x%016lx - no area found", virt_addr);
         spinlock_irq_release(&vmm_lock);
         return -1;  /* no area contains this address */
     }
@@ -534,7 +534,7 @@ int vmm_handle_page_fault(vm_space_t *space, uint64_t virt_addr,
         }
 
         if (!(area->flags & VMM_WRITE)) {
-            printk("vmm: Write to read-only region at 0x%016lx\n", page_addr);
+            ewarn("vmm: write to read-only region at 0x%016lx", page_addr);
             vmm_stats.protection_faults++;
             spinlock_irq_release(&vmm_lock);
             return -1;
@@ -546,7 +546,7 @@ int vmm_handle_page_fault(vm_space_t *space, uint64_t virt_addr,
 
         uint64_t phys = pmm_alloc_page();
         if (phys == 0) {
-            printk("vmm: out of memory during lazy allocation!\n");
+            ewarn("vmm: out of memory during lazy allocation");
             spinlock_irq_release(&vmm_lock);
             return -1;
         }

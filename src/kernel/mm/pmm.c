@@ -1,6 +1,7 @@
 #include <core/spinlock.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <mm/pmm.h>
 
@@ -99,7 +100,7 @@ static void pmm_add_region(uint64_t base, uint64_t length) {
 
 void pmm_init(void) {
     if (hhdm_request.response == NULL) {
-        printk("pmm: panic: no HHDM response from bootloader!\n");
+        epanic("pmm", "no HHDM response from bootloader");
         for(;;);
     }
     hhdm_offset = hhdm_request.response->offset;
@@ -126,7 +127,7 @@ void pmm_init(void) {
     zones[PMM_ZONE_NORMAL].free_stack = NULL;
     
     if (memmap_request.response == NULL) {
-        printk("pmm: panic: no memory map from bootloader!\n");
+        epanic("pmm", "no memory map from bootloader");
         for(;;);
     }
     
@@ -146,8 +147,6 @@ void pmm_init(void) {
     for (int i = 0; i < PMM_ZONE_COUNT; i++) {
         pmm_calculate_watermarks(&zones[i]);
     }
-    
-   printk_ts("pmm: initialized\n");
 }
 
 uint64_t pmm_alloc_page(void) {
@@ -167,7 +166,7 @@ uint64_t pmm_alloc_page(void) {
         return addr;
     }
     
-    printk("pmm: warning: out of memory!\n");
+    ewarn("pmm: out of memory");
     return 0;
 }
 
@@ -206,7 +205,7 @@ void pmm_free_page(uint64_t phys_addr) {
     }
     
     if (!IS_PAGE_ALIGNED(phys_addr)) {
-        printk("pmm: warning: Attempted to free unaligned address 0x%016lx\n", phys_addr);
+        ewarn("pmm: attempted to free unaligned address 0x%016lx", phys_addr);
         return;
     }
     

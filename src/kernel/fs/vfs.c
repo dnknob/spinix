@@ -9,6 +9,7 @@
 #include <mm/heap.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <klibc/string.h>
 #include <errno.h>
@@ -74,8 +75,6 @@ void vfs_init(void) {
     vfs_state.num_fs_types = 0;
 
     vfs_state.initialized = true;
-
-    printk("vfs: initialized\n");
 }
 
 int vfs_register_filesystem(const vfs_filesystem_ops_t *fs_ops) {
@@ -100,7 +99,7 @@ int vfs_register_filesystem(const vfs_filesystem_ops_t *fs_ops) {
 
     spinlock_irq_release(&vfs_state.fs_type_lock);
 
-    printk("vfs: registered filesystem type '%s'\n", fs_ops->fs_name);
+    veinfo("vfs: registered filesystem type '%s'", fs_ops->fs_name);
     return 0;
 }
 
@@ -147,7 +146,7 @@ int vfs_mount(const char *device, const char *mountpoint, const char *fstype, ui
 
     const vfs_filesystem_ops_t *fs_ops = vfs_find_filesystem(fstype);
     if (fs_ops == NULL) {
-        printk("vfs: unknown filesystem type '%s'\n", fstype);
+        eerror("vfs: unknown filesystem type '%s'\n", fstype);
         return -ENODEV;
     }
 
@@ -155,7 +154,7 @@ int vfs_mount(const char *device, const char *mountpoint, const char *fstype, ui
     if (device != NULL) {
         blk_dev = blk_find_device_by_name(device);
         if (blk_dev == NULL) {
-            printk("vfs: device '%s' not found\n", device);
+            eerror("vfs: device '%s' not found\n", device);
             return -ENODEV;
         }
 
@@ -208,7 +207,7 @@ int vfs_mount(const char *device, const char *mountpoint, const char *fstype, ui
     vfs_state.mount_list = mount;
     spinlock_irq_release(&vfs_state.mount_lock);
 
-    printk("vfs: mounted %s on %s (type %s)\n",
+    veinfo("vfs: mounted %s on %s (type %s)\n",
            device ? device : "none", mountpoint, fstype);
 
     return 0;
@@ -922,6 +921,11 @@ int vfs_rmdir(const char *path) {
     int ret = vfs_lookup_parent(path, &parent, name);
     if (ret != 0) return ret;
 
+    if (name[0] == '\0') {
+        vfs_vnode_unref(parent);
+        return -EBUSY;
+    }
+
     if (parent->v_ops == NULL || parent->v_ops->rmdir == NULL) {
         vfs_vnode_unref(parent); return -ENOTSUP;
     }
@@ -983,6 +987,11 @@ int vfs_unlink(const char *path) {
 
     int ret = vfs_lookup_parent(path, &parent, name);
     if (ret != 0) return ret;
+
+    if (name[0] == '\0') {
+        vfs_vnode_unref(parent);
+        return -EISDIR;
+    }
 
     if (parent->v_ops == NULL || parent->v_ops->unlink == NULL) {
         vfs_vnode_unref(parent); return -ENOTSUP;

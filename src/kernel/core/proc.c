@@ -1,12 +1,18 @@
+#include <arch/x86_64/switch.h>
 #include <arch/x86_64/mmu.h>
 
 #include <core/scheduler.h>
 #include <core/proc.h>
 
+#include <fs/vfs.h>
+
 #include <mm/paging.h>
 #include <mm/heap.h>
+#include <mm/vmm.h>
+#include <mm/mmu.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <klibc/string.h>
 
@@ -20,7 +26,17 @@ static pcb_t *zombie_list = NULL;
 
 extern void lock_scheduler(void);
 extern void unlock_scheduler(void);
-extern void task_set_owner_proc(tcb_t *task, struct pcb *proc);  /* NEW */
+extern void task_set_owner_proc(tcb_t *task, struct pcb *proc);
+
+static void user_task_trampoline(void) {
+    pcb_t *proc = proc_get_current();
+    if (proc == NULL || !(proc->flags & PROC_FLAG_USER)) {
+        terminate_task();
+        return;
+    }
+    enter_userspace(proc->user_entry, proc->user_rsp, proc->user_rflags);
+    for (;;) __asm__("hlt");
+}
 
 void waitq_init(wait_queue_t *wq) {
     if (wq == NULL) return;
@@ -293,11 +309,19 @@ int proc_kill(pid_t pid, int signal) {
 static pcb_t *alloc_pcb(const char *name, uint8_t priority) {
     pcb_t *proc = (pcb_t *)kmalloc(sizeof(pcb_t));
     if (proc == NULL) {
-        printk("panic: proc: failed to allocate pcb\n");
+        epanic("proc", "failed to allocate PCB");
         return NULL;
     }
-
     memset(proc, 0, sizeof(pcb_t));
+
+    proc->fd_table = (file_descriptor_t **)kmalloc(
+        PROC_MAX_FDS * sizeof(file_descriptor_t *));
+    if (proc->fd_table == NULL) {
+        epanic("proc", "failed to allocate fd table");
+        kfree(proc);
+        return NULL;
+    }
+    memset(proc->fd_table, 0, PROC_MAX_FDS * sizeof(file_descriptor_t *));
 
     proc->pid = next_pid++;
     strncpy(proc->name, name, PROC_NAME_LEN - 1);
@@ -392,7 +416,7 @@ void proc_init(void) {
 
     init_process = alloc_pcb("init", 128);
     if (init_process == NULL) {
-        printk("panic: proc: failed to create init process\n");
+        epanic("proc", "failed to create init process");
         for (;;) __asm__("hlt");
     }
 
@@ -442,7 +466,7 @@ pcb_t *proc_create_child(pcb_t *parent, const char *name, void (*entry_point)(vo
 
     tcb_t *main_thread = create_kernel_task(entry_point, thread_name, priority);
     if (main_thread == NULL) {
-        printk("panic: proc: failed to create main thread for process '%s'\n", name);
+        epanic("proc", "failed to create main thread");
         kfree(proc);
         return NULL;
     }
@@ -461,6 +485,165 @@ pcb_t *proc_create_child(pcb_t *parent, const char *name, void (*entry_point)(vo
 
     return proc;
 
+}
+
+pcb_t *proc_create_user(const char *name, uint64_t entry,
+                        uint64_t user_stack_top, uint8_t priority)
+{
+    pcb_t *proc = alloc_pcb(name, priority);
+    if (proc == NULL) return NULL;
+
+    vm_space_t *space = vmm_create_space();
+    if (space == NULL) { kfree(proc); return NULL; }
+    proc->vm_space = space;
+
+    uint64_t pml4_phys = mmu_get_pml4_phys((mmu_context_t *)space->mmu_ctx);
+    proc->cr3 = pml4_phys;
+
+    proc->user_entry      = entry;
+    proc->user_rsp        = user_stack_top;
+    proc->user_rflags     = 0x202;       /* IF set, reserved bit 1 */
+    proc->user_stack_virt = user_stack_top;
+    proc->user_stack_size = PROC_USER_STACK_SIZE;
+    proc->flags          &= ~PROC_FLAG_KERNEL;
+    proc->flags          |=  PROC_FLAG_USER;
+
+    tcb_t *t = create_kernel_task(user_task_trampoline, name, priority);
+    if (t == NULL) {
+        vmm_destroy_space(space);
+        kfree(proc);
+        return NULL;
+    }
+    t->cr3 = pml4_phys;   /* so switch_to_task loads the right PML4 */
+
+    proc->threads[0]   = t;
+    proc->main_thread  = t;
+    proc->thread_count = 1;
+    task_set_owner_proc(t, proc);
+
+    add_child_to_parent(init_process, proc);
+    add_to_process_list(proc);
+    proc->state = PROC_STATE_READY;
+
+    return proc;
+}
+
+pcb_t *proc_create_user_with_space(const char *name, uint64_t entry,
+                                   uint64_t user_stack_top,
+                                   uint8_t priority,
+                                   vm_space_t *space)
+{
+    if (space == NULL) return NULL;
+
+    pcb_t *proc = alloc_pcb(name, priority);
+    if (proc == NULL) return NULL;
+
+    uint64_t pml4_phys = mmu_get_pml4_phys((mmu_context_t *)space->mmu_ctx);
+
+    proc->vm_space        = space;
+    proc->cr3             = pml4_phys;
+    proc->user_entry      = entry;
+    proc->user_rsp        = user_stack_top;
+    proc->user_rflags     = 0x202;
+    proc->user_stack_virt = user_stack_top;
+    proc->user_stack_size = PROC_USER_STACK_SIZE;
+    proc->flags          &= ~PROC_FLAG_KERNEL;
+    proc->flags          |=  PROC_FLAG_USER;
+
+    tcb_t *t = create_kernel_task(user_task_trampoline, name, priority);
+    if (t == NULL) { kfree(proc); return NULL; }
+    t->cr3 = pml4_phys;
+
+    proc->threads[0]   = t;
+    proc->main_thread  = t;
+    proc->thread_count = 1;
+    task_set_owner_proc(t, proc);
+
+    add_child_to_parent(init_process, proc);
+    add_to_process_list(proc);
+    proc->state = PROC_STATE_READY;
+
+    return proc;
+}
+
+pcb_t *proc_fork(uint64_t user_rip, uint64_t user_rsp, uint64_t user_rflags)
+{
+    pcb_t *parent = proc_get_current();
+    if (parent == NULL || !(parent->flags & PROC_FLAG_USER))
+        return NULL;
+
+    pcb_t *child = alloc_pcb(parent->name, parent->priority);
+    if (child == NULL)
+        return NULL;
+
+    vm_space_t *child_space = vmm_fork_space((vm_space_t *)parent->vm_space);
+    if (child_space == NULL) {
+        kfree(child->fd_table);
+        kfree(child);
+        return NULL;
+    }
+    child->vm_space = child_space;
+    child->cr3      = mmu_get_pml4_phys((mmu_context_t *)child_space->mmu_ctx);
+
+    for (int i = 0; i < PROC_MAX_FDS; i++) {
+        file_descriptor_t *pfde = parent->fd_table[i];
+        if (pfde == NULL)
+            continue;
+
+        file_descriptor_t *cfde =
+            (file_descriptor_t *)kmalloc(sizeof(file_descriptor_t));
+        if (cfde == NULL)
+            continue;   /* best-effort; real kernels would unwind, but this is fine */
+
+        *cfde          = *pfde;
+        cfde->refcount = 1;
+
+        if (cfde->file != NULL)
+            __sync_fetch_and_add(&((vfs_file_t *)cfde->file)->f_refcount, 1);
+
+        child->fd_table[i] = cfde;
+    }
+
+    child->heap_base       = parent->heap_base;
+    child->heap_brk        = parent->heap_brk;
+    child->cred            = parent->cred;
+    child->pgid            = parent->pgid;
+    child->sid             = parent->sid;
+    child->session_leader  = parent->session_leader;
+    memcpy(child->cwd,          parent->cwd,          PROC_CWD_LEN);
+    memcpy(child->sig_handlers, parent->sig_handlers, sizeof(parent->sig_handlers));
+    child->sig_blocked     = parent->sig_blocked;
+    child->flags           = parent->flags;
+
+    child->user_entry      = user_rip;
+    child->user_rsp        = user_rsp;
+    child->user_rflags     = user_rflags;
+    child->user_stack_virt = parent->user_stack_virt;
+    child->user_stack_size = parent->user_stack_size;
+
+    tcb_t *t = create_kernel_task(user_task_trampoline, child->name, child->priority);
+    if (t == NULL) {
+        vmm_destroy_space(child_space);
+        proc_fd_close_all(child);
+        kfree(child->fd_table);
+        kfree(child);
+        return NULL;
+    }
+    t->cr3 = child->cr3;
+
+    child->threads[0]   = t;
+    child->main_thread  = t;
+    child->thread_count = 1;
+    task_set_owner_proc(t, child);
+
+    add_child_to_parent(parent, child);
+    add_to_process_list(child);
+    child->state = PROC_STATE_READY;
+
+    veinfo("fork: pid %lu -> child pid %lu (rip=0x%lx)",
+           parent->pid, child->pid, user_rip);
+
+    return child;
 }
 
 tcb_t *proc_add_thread(pcb_t *proc, void (*entry_point)(void), const char *thread_name) {
@@ -516,9 +699,6 @@ void proc_terminate(pcb_t *proc, int exit_code) {
     if (proc == NULL || proc->state == PROC_STATE_TERMINATED) {
         return;
     }
-
-    printk("proc: terminating process '%s' (pid %lu) exit code %d\n",
-           proc->name, proc->pid, exit_code);
 
     lock_scheduler();
 
@@ -707,6 +887,7 @@ void proc_reap_zombies(void) {
                 }
             }
 
+            kfree(proc->fd_table);
             kfree(proc);
         } else {
             prev = &proc->next;

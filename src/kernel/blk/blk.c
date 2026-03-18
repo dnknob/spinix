@@ -3,6 +3,7 @@
 #include <core/spinlock.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <klibc/string.h>
 #include <errno.h>
@@ -14,7 +15,6 @@ static spinlock_irq_t blk_list_lock = SPINLOCK_IRQ_INIT;
 void blk_init(void) {
     blk_device_list = NULL;
     spinlock_irq_init(&blk_list_lock);
-    printk_ts("blk: block device layer initialized\n");
 }
 
 int blk_register_device(struct blk_device *dev) {
@@ -40,7 +40,7 @@ int blk_register_device(struct blk_device *dev) {
     blk_device_list = dev;
     spinlock_irq_release(&blk_list_lock);
 
-    printk_ts("blk: registered %s (major=%u, minor=%u, blocks=%llu, size=%u)\n",
+    veinfo("blk: registered %s (major=%u, minor=%u, blocks=%llu, size=%u)\n",
            dev->name, dev->major, dev->minor, dev->num_blocks, dev->block_size);
 
     return 0;
@@ -54,7 +54,7 @@ void blk_unregister_device(struct blk_device *dev) {
     }
 
     if (dev->open_count > 0) {
-        printk("blk: cannot unregister %s, still open (%u refs)\n",
+        ewarn("blk: cannot unregister %s, still open (%u refs)\n",
                dev->name, dev->open_count);
         return;
     }

@@ -14,6 +14,7 @@
 #include <core/spinlock.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <klibc/string.h>
 #include <errno.h>
@@ -122,7 +123,7 @@ int ahci_port_stop(ahci_port_t *port)
     }
     
     if (regs->cmd & AHCI_PORT_CMD_CR) {
-        printk("ahci: port %u failed to stop command engine\n", port->port_num);
+        eerror("ahci: port %u failed to stop command engine\n", port->port_num);
         return -ETIMEDOUT;
     }
     
@@ -137,7 +138,7 @@ int ahci_port_stop(ahci_port_t *port)
     }
     
     if (regs->cmd & AHCI_PORT_CMD_FR) {
-        printk("ahci: port %u failed to stop FIS receive\n", port->port_num);
+        eerror("ahci: port %u failed to stop FIS receive\n", port->port_num);
         return -ETIMEDOUT;
     }
     
@@ -162,7 +163,7 @@ int ahci_port_start(ahci_port_t *port)
     }
     
     if (!(regs->cmd & AHCI_PORT_CMD_FR)) {
-        printk("ahci: port %u failed to start FIS receive\n", port->port_num);
+        eerror("ahci: port %u failed to start FIS receive\n", port->port_num);
         return -ETIMEDOUT;
     }
     
@@ -177,7 +178,7 @@ int ahci_port_start(ahci_port_t *port)
     }
     
     if (!(regs->cmd & AHCI_PORT_CMD_CR)) {
-        printk("ahci: port %u failed to start command engine\n", port->port_num);
+        eerror("ahci: port %u failed to start command engine\n", port->port_num);
         return -ETIMEDOUT;
     }
     
@@ -305,7 +306,7 @@ int ahci_port_identify(ahci_port_t *port)
         }
         
         if (regs->is & AHCI_PORT_INT_TFES) {
-            printk("ahci: port %u IDENTIFY failed (error)\n", port->port_num);
+            eerror("ahci: port %u IDENTIFY failed (error)\n", port->port_num);
             ret = -EIO;
             goto cleanup;
         }
@@ -314,7 +315,7 @@ int ahci_port_identify(ahci_port_t *port)
     }
     
     if (regs->ci & (1 << slot)) {
-        printk("ahci: port %u IDENTIFY timeout\n", port->port_num);
+        eerror("ahci: port %u IDENTIFY timeout\n", port->port_num);
         ret = -ETIMEDOUT;
         goto cleanup;
     }
@@ -405,7 +406,7 @@ int ahci_port_init(ahci_controller_t *ctrl, uint32_t port_num)
     
     ret = ahci_port_alloc_memory(port);
     if (ret != 0) {
-        printk("ahci: port %u failed to allocate memory\n", port_num);
+        eerror("ahci: port %u failed to allocate memory\n", port_num);
         return ret;
     }
     
@@ -472,7 +473,7 @@ int ahci_port_init(ahci_controller_t *ctrl, uint32_t port_num)
     
     port->type = sig;
     
-    printk("ahci: port %u: signature = 0x%08x (%s)\n", 
+    veinfo("ahci: port %u: signature = 0x%08x (%s)\n", 
            port_num, sig, ahci_port_type_string(sig));
     
     if (sig == 0xFFFFFFFF) {
@@ -484,7 +485,7 @@ int ahci_port_init(ahci_controller_t *ctrl, uint32_t port_num)
     }
     
     if (sig == AHCI_SIG_ATAPI) {
-        printk("ahci: port %u: ATAPI device not supported\n", port_num);
+        ewarn("ahci: port %u: ATAPI device not supported", port_num);
         ahci_port_stop(port);
         ahci_port_free_memory(port);
         port->implemented = 0;
@@ -497,13 +498,13 @@ int ahci_port_init(ahci_controller_t *ctrl, uint32_t port_num)
     
     ret = ahci_port_identify(port);
     if (ret != 0) {
-        printk("ahci: port %u failed to identify device\n", port_num);
+        eerror("ahci: port %u failed to identify device\n", port_num);
         ahci_port_stop(port);
         ahci_port_free_memory(port);
         return ret;
     }
     
-    printk("ahci: port %u: %s (%llu MB) - %s\n",
+    veinfo("ahci: port %u: %s (%llu MB) - %s\n",
            port_num,
            port->model,
            (port->sectors * 512) / (1024 * 1024),
@@ -584,7 +585,7 @@ int ahci_port_read(ahci_port_t *port, uint64_t lba, uint32_t count, void *buffer
         }
         
         if (regs->is & AHCI_PORT_INT_TFES) {
-            printk("ahci: port %u read error at LBA %llu\n", port->port_num, lba);
+            eerror("ahci: port %u read error at LBA %llu\n", port->port_num, lba);
             ahci_port_clear_is(regs);
             ret = -EIO;
             goto out;
@@ -594,7 +595,7 @@ int ahci_port_read(ahci_port_t *port, uint64_t lba, uint32_t count, void *buffer
     }
     
     if (regs->ci & (1 << slot)) {
-        printk("ahci: port %u read timeout at LBA %llu\n", port->port_num, lba);
+        eerror("ahci: port %u read timeout at LBA %llu\n", port->port_num, lba);
         ret = -ETIMEDOUT;
         goto out;
     }
@@ -677,7 +678,7 @@ int ahci_port_write(ahci_port_t *port, uint64_t lba, uint32_t count, const void 
         }
         
         if (regs->is & AHCI_PORT_INT_TFES) {
-            printk("ahci: port %u write error at LBA %llu\n", port->port_num, lba);
+            eerror("ahci: port %u write error at LBA %llu\n", port->port_num, lba);
             ahci_port_clear_is(regs);
             ret = -EIO;
             goto out;
@@ -687,7 +688,7 @@ int ahci_port_write(ahci_port_t *port, uint64_t lba, uint32_t count, const void 
     }
     
     if (regs->ci & (1 << slot)) {
-        printk("ahci: port %u write timeout at LBA %llu\n", port->port_num, lba);
+        eerror("ahci: port %u write timeout at LBA %llu\n", port->port_num, lba);
         ret = -ETIMEDOUT;
         goto out;
     }
@@ -799,7 +800,7 @@ static int ahci_hba_reset(ahci_controller_t *ctrl)
     }
     
     if (hba->ghc & AHCI_GHC_HR) {
-        printk("ahci: HBA reset timeout\n");
+        eerror("ahci: HBA reset timeout");
         return -ETIMEDOUT;
     }
     
@@ -815,8 +816,6 @@ void ahci_print_info(ahci_controller_t *ctrl)
     uint32_t version = hba->vs;
     uint16_t major = (version >> 16) & 0xFFFF;
     uint16_t minor = version & 0xFFFF;
-    
-    printk("\n");
 }
 
 int ahci_probe_controller(pci_device_t *pci_dev)
@@ -824,7 +823,7 @@ int ahci_probe_controller(pci_device_t *pci_dev)
     int ret;
     
     if (ahci_controller_count >= AHCI_MAX_CONTROLLERS) {
-        printk("ahci: maximum number of controllers reached\n");
+        ewarn("ahci: maximum number of controllers reached");
         return -ENOMEM;
     }
     
@@ -837,12 +836,12 @@ int ahci_probe_controller(pci_device_t *pci_dev)
                                               pci_dev->function, PCI_BAR5);
     
     if (bar5_low == 0 || bar5_low == 0xFFFFFFFF) {
-        printk("ahci: BAR5 is not valid (0x%x)\n", bar5_low);
+        eerror("ahci: BAR5 is not valid (0x%x)", bar5_low);
         return -ENODEV;
     }
     
     if (bar5_low & PCI_BAR_TYPE_IO) {
-        printk("ahci: BAR5 is I/O space, expected memory space\n");
+        eerror("ahci: BAR5 is I/O space, expected memory space");
         return -ENODEV;
     }
     
@@ -873,7 +872,7 @@ int ahci_probe_controller(pci_device_t *pci_dev)
     ret = vmm_map_region(kernel_space, virt_addr, abar_size, flags,
                          VMM_TYPE_PHYS, 0, phys_addr);
     if (ret != 0) {
-        printk("ahci: failed to map ABAR (phys=0x%llx, virt=0x%llx, ret=%d)\n", 
+        eerror("ahci: failed to map ABAR (phys=0x%llx, virt=0x%llx, ret=%d)", 
                phys_addr, virt_addr, ret);
         return -ENOMEM;
     }
@@ -922,7 +921,7 @@ void ahci_init(void)
     pci_device_t *dev = pci_find_device_by_class(AHCI_PCI_CLASS, AHCI_PCI_SUBCLASS);
     while (dev) {
         if (dev->prog_if == AHCI_PCI_PROGIF) {
-            printk("ahci: found controller at %02x:%02x.%x\n",
+            veinfo("ahci: found controller at %02x:%02x.%x\n",
                    dev->bus, dev->device, dev->function);
             
             int ret = ahci_probe_controller(dev);
@@ -935,8 +934,8 @@ void ahci_init(void)
     }
     
     if (ahci_controller_count == 0) {
-        printk("ahci: no controllers found\n");
+        eerror("ahci: no controllers found");
     } else {
-        printk("ahci: initialized %zu controller(s)\n", ahci_controller_count);
+        veinfo("ahci: initialized %zu controller(s)", ahci_controller_count);
     }
 }

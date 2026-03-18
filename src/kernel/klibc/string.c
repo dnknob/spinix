@@ -79,6 +79,15 @@ size_t strlen(const char *a) {
 	return s;
 }
 
+char *strchr(const char *s, int c) {
+    while (*s != '\0') {
+        if (*s == (char)c)
+            return (char *)s;
+        s++;
+    }
+    return (c == '\0') ? (char *)s : NULL;
+}
+
 int strncmp(const char *a, const char *b, size_t c) {
 	int diff = 0;
 

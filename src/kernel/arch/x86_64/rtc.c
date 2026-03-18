@@ -5,6 +5,7 @@
 #include <arch/x86_64/io.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <stdint.h>
 #include <stddef.h>
@@ -110,17 +111,17 @@ static void rtc_irq_handler(struct interrupt_frame *frame)
     }
 
     if (regc & RTC_C_PF) {
-        /* Periodic interrupt — not enabled by default, placeholder */
+        /* Periodic interrupt not enabled by default, placeholder */
     }
 
     if (regc & RTC_C_AF) {
-        /* Alarm interrupt — not enabled by default, placeholder */
+        /* Alarm interrupt not enabled by default, placeholder */
     }
 }
 
 void rtc_init(void)
 {
-    printk("rtc: initialising RTC driver\n");
+    ebegin("Starting real-time clock");
 
     uint8_t regb = rtc_cmos_read(RTC_REG_B);
     regb &= ~(RTC_B_PIE | RTC_B_AIE | RTC_B_UIE);
@@ -142,8 +143,10 @@ void rtc_init(void)
 
     rtc_read_registers((rtc_time_t *)&rtc_cache);
 
-    printk("rtc: current time %04u-%02u-%02u %02u:%02u:%02u\n",
-           rtc_cache.year,  rtc_cache.month,  rtc_cache.day,
-           rtc_cache.hour,  rtc_cache.minute, rtc_cache.second);
-    printk("rtc: IRQ 8 enabled (Update-Ended, 1 Hz)\n");
+    eindent();
+        veinfo("current time: %04u-%02u-%02u %02u:%02u:%02u",
+               rtc_cache.year, rtc_cache.month, rtc_cache.day,
+               rtc_cache.hour, rtc_cache.minute, rtc_cache.second);
+    eoutdent();
+    eend(0, NULL);
 }

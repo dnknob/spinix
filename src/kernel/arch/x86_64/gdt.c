@@ -1,3 +1,4 @@
+#include <arch/x86_64/syscall.h>
 #include <arch/x86_64/gdt.h>
 
 #include <video/printk.h>
@@ -87,11 +88,13 @@ void gdt_init(void)
 
     gdt_flush((uint64_t)&gdt_pointer);
     tss_flush();
+    gdt_set_kernel_stack((uint64_t)&ist_stack_df[IST_STACK_SIZE]);
 }
 
 void gdt_set_kernel_stack(uint64_t stack)
 {
-    tss.rsp0 = stack;
+    tss.rsp0          = stack;
+    syscall_kernel_rsp = stack;
 }
 
 void gdt_set_ist(uint8_t ist_num, uint64_t stack)

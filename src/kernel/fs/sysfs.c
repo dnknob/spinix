@@ -6,6 +6,7 @@
 #include <mm/heap.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <klibc/string.h>
 #include <errno.h>
@@ -452,7 +453,7 @@ int sysfs_mount(struct blk_device *dev, uint32_t flags, vfs_mount_t **mount_out)
 
     *mount_out = mount;
 
-    printk("sysfs: mounted\n");
+    veinfo("sysfs: mounted\n");
     return 0;
 }
 
@@ -487,19 +488,19 @@ static const vfs_filesystem_ops_t sysfs_fs_ops = {
 int sysfs_init(void) {
     int ret = vfs_register_filesystem(&sysfs_fs_ops);
     if (ret != 0) {
-        printk("sysfs: failed to register: %d\n", ret);
+        eerror("sysfs: failed to register: %d\n", ret);
         return ret;
     }
 
     ret = vfs_mkdir("/sys", 0555);
     if (ret != 0 && ret != -EEXIST) {
-        printk("sysfs: failed to create /sys mountpoint: %d\n", ret);
+        eerror("sysfs: failed to create /sys mountpoint: %d\n", ret);
         return ret;
     }
 
     ret = vfs_mount(NULL, "/sys", "sysfs", VFS_MNT_RDONLY);
     if (ret != 0) {
-        printk("sysfs: failed to mount: %d\n", ret);
+        eerror("sysfs: failed to mount: %d\n", ret);
         return ret;
     }
 
@@ -519,8 +520,6 @@ int sysfs_init(void) {
             /* Non-fatal; continue */
         }
     }
-
-    printk("sysfs: initialized\n");
     return 0;
 }
 

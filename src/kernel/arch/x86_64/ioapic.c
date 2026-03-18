@@ -3,6 +3,7 @@
 #include <mm/mmu.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -108,7 +109,7 @@ uint8_t ioapic_get_max_redirects(ioapic_t *ioapic) {
 
 ioapic_t *ioapic_register(uint64_t phys_base, uint8_t id, uint32_t gsi_base) {
     if (ioapic_count >= MAX_IOAPICS) {
-        printk("ioapic: Maximum number of I/O APICs (%u) reached\n", MAX_IOAPICS);
+        ewarn("ioapic: maximum number of I/O APICs (%u) reached", MAX_IOAPICS);
         return NULL;
     }
 
@@ -123,7 +124,7 @@ ioapic_t *ioapic_register(uint64_t phys_base, uint8_t id, uint32_t gsi_base) {
     int result = mmu_map_page(kernel_ctx, ioapic->virt_base, phys_base,
                               MMU_MAP_PRESENT | MMU_MAP_WRITE | MMU_MAP_NOCACHE);
     if (result != 0) {
-        printk("ioapic: failed to map I/O APIC at 0x%llx\n", phys_base);
+        eerror("ioapic: failed to map at 0x%lx", phys_base);
         ioapic->virt_base = 0;
         return NULL;
     }
@@ -144,7 +145,7 @@ ioapic_t *ioapic_register(uint64_t phys_base, uint8_t id, uint32_t gsi_base) {
         current_id = (id_reg >> 24) & 0xF;
         
         if (current_id != id) {
-            printk("ioapic: warning: failed to set ID to %u (current: %u)\n", 
+            ewarn("ioapic: failed to set ID to %u (current: %u)", 
                    id, current_id);
         }
     }
@@ -311,17 +312,16 @@ int ioapic_map_isa_irq(uint8_t irq, uint8_t vector, uint8_t destination) {
 
 void ioapic_init(void) {
     /* TODO: Parse ACPI MADT or MP tables for actual I/O APIC configuration */
-
+    ebegin("Starting I/O APIC");
 
     ioapic_t *ioapic = ioapic_register(IOAPIC_DEFAULT_BASE, 0, 0);
     if (ioapic == NULL) {
-        printk("ioapic: failed to initialize default I/O APIC\n");
+        eerror("ioapic: failed to initialize default I/O APIC");
         return;
     }
 
     ioapic_mask_all(ioapic);
-
-    printk_ts("ioapic: initialized\n");
+    eend(0, NULL);
 }
 
 void ioapic_print_info(void) {

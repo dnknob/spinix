@@ -5,6 +5,7 @@
 #include <mm/pmm.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <klibc/string.h>
 
@@ -57,7 +58,7 @@ static void detect_cpu_features(void) {
 static page_table_t *alloc_page_table(void) {
     uint64_t phys = pmm_alloc_page();
     if (phys == 0) {
-        printk("mmu: panic: failed to allocate page table!\n");
+        epanic("mmu", "failed to allocate page table");
         return NULL;
     }
 
@@ -152,7 +153,6 @@ void mmu_init(void) {
     }
 
     mmu_initialized = 1;
-    printk_ts("mmu: initialized\n");
 }
 
 mmu_context_t *mmu_get_kernel_context(void) {
@@ -425,7 +425,7 @@ int mmu_map_huge_page(mmu_context_t *ctx, uint64_t virt_addr, uint64_t phys_addr
 
     if (!mmu_is_aligned_for_huge(virt_addr, size) ||
         !mmu_is_aligned_for_huge(phys_addr, size)) {
-        printk("mmu: Huge page addresses must be properly aligned\n");
+        ewarn("mmu: huge page addresses must be properly aligned");
         return -1;
     }
 
@@ -438,7 +438,7 @@ int mmu_map_huge_page(mmu_context_t *ctx, uint64_t virt_addr, uint64_t phys_addr
 
     if (size == MMU_PAGE_2M) {
         if (!cpu_features.supports_2mb_pages) {
-            printk("mmu: CPU doesn't support 2MB pages\n");
+            ewarn("mmu: CPU does not support 2MB pages");
             return -1;
         }
 
@@ -460,7 +460,7 @@ int mmu_map_huge_page(mmu_context_t *ctx, uint64_t virt_addr, uint64_t phys_addr
 
     } else if (size == MMU_PAGE_1G) {
         if (!cpu_features.supports_1gb_pages) {
-            printk("mmu: CPU doesn't support 1GB pages\n");
+            ewarn("mmu: CPU does not support 1GB pages");
             return -1;
         }
 
@@ -903,6 +903,10 @@ int mmu_unmap_batch(mmu_context_t *ctx, const uint64_t *virt_addrs, size_t count
     for (size_t i = 0; i < count; i++)
         mmu_unmap_page(ctx, virt_addrs[i]);
     return 0;
+}
+
+uint64_t mmu_get_pml4_phys(mmu_context_t *ctx) {
+    return ctx ? ctx->pml4_phys : 0;
 }
 
 void mmu_print_mapping_info(mmu_context_t *ctx, uint64_t virt_addr) {

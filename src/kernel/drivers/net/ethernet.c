@@ -4,6 +4,7 @@
 #include <mm/heap.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <klibc/string.h>
 
@@ -77,7 +78,7 @@ void eth_init(void)
 
     char macbuf[18];
     eth_mac_sprint(macbuf, g_eth.mac);
-    printk("eth: initialised, MAC %s\n", macbuf);
+    veinfo("eth: MAC %s", macbuf);
 }
 
 int eth_send(const uint8_t dst[ETH_ADDR_LEN],
@@ -91,7 +92,7 @@ int eth_send(const uint8_t dst[ETH_ADDR_LEN],
     }
 
     if (len > ETH_MAX_PAYLOAD) {
-        printk("eth: send: payload too large (%u > %u)\n",
+        eerror("eth: payload too large (%u > %u)",
                len, ETH_MAX_PAYLOAD);
         g_eth.tx_errors++;
         return -1;
@@ -105,7 +106,7 @@ int eth_send(const uint8_t dst[ETH_ADDR_LEN],
 
     uint8_t *frame = kmalloc(frame_len);
     if (!frame) {
-        printk("eth: send: kmalloc failed\n");
+        eerror("eth: kmalloc failed on send");
         g_eth.tx_errors++;
         return -1;
     }
@@ -141,7 +142,7 @@ int eth_register_protocol(uint16_t ethertype, eth_proto_handler_t handler)
     for (int i = 0; i < ETH_MAX_PROTOCOLS; i++) {
         if (g_eth.protos[i].ethertype == ethertype &&
             g_eth.protos[i].handler   != NULL) {
-            printk("eth: protocol 0x%04x already registered\n", ethertype);
+            ewarn("eth: protocol 0x%04x already registered", ethertype);
             return -1;
         }
     }
@@ -151,12 +152,12 @@ int eth_register_protocol(uint16_t ethertype, eth_proto_handler_t handler)
             g_eth.protos[i].ethertype = ethertype;
             g_eth.protos[i].handler   = handler;
             g_eth.proto_count++;
-            printk("eth: registered protocol 0x%04x\n", ethertype);
+            veinfo("eth: registered protocol 0x%04x", ethertype);
             return 0;
         }
     }
 
-    printk("eth: protocol table full (max %d)\n", ETH_MAX_PROTOCOLS);
+    ewarn("eth: protocol table full (max %d)", ETH_MAX_PROTOCOLS);
     return -1;
 }
 

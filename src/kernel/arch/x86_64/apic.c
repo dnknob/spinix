@@ -4,6 +4,7 @@
 #include <mm/mmu.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -222,7 +223,7 @@ void apic_clear_errors(void) {
 
 bool apic_enable_x2apic(void) {
     if (!apic_check_x2apic_support()) {
-        printk("apic: x2APIC not supported by CPU\n");
+        ewarn("apic: x2APIC not supported by CPU");
         return false;
     }
     
@@ -242,9 +243,11 @@ bool apic_enable_x2apic(void) {
 }
 
 void apic_init(void) {
+    ebegin("Starting local APIC");
+
     /* Check if APIC is supported */
     if (!apic_check_support()) {
-        printk("apic: not supported by CPU\n");
+        eerror("apic: not supported by CPU");
         return;
     }
     
@@ -267,7 +270,7 @@ void apic_init(void) {
         int result = mmu_map_page(kernel_ctx, lapic_base_virt, lapic_base_phys,
                                   MMU_MAP_PRESENT | MMU_MAP_WRITE | MMU_MAP_NOCACHE);
         if (result != 0) {
-            printk("apic: failed to map APIC registers\n");
+            eerror("apic: failed to map APIC registers");
             lapic_base_virt = 0;
             return;
         }
@@ -295,5 +298,5 @@ void apic_init(void) {
     if (tsc_deadline_available) {
     }
     
-   printk_ts("apic: initialized\n");
+    eend(0, NULL);
 }

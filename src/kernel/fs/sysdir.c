@@ -11,6 +11,7 @@
 #include <mm/heap.h>
 
 #include <video/printk.h>
+#include <video/log.h>
 
 #include <klibc/string.h>
 #include <errno.h>
@@ -37,14 +38,14 @@ int sysdev_register(sysdev_t *dev) {
 
     int ret = sysfs_mkdir(dev->path, 0555);
     if (ret != 0 && ret != -EEXIST) {
-        printk("sysdir: failed to create %s: %d\n", dev->path, ret);
+        eerror("sysdir: failed to create %s: %d\n", dev->path, ret);
         return ret;
     }
 
     for (n = 0; dev->attrs[n].name != NULL; n++) {
         ret = sysfs_create_attr(dev->path, &dev->attrs[n]);
         if (ret != 0) {
-            printk("sysdir: failed to create attr '%s' in %s: %d\n",
+            eerror("sysdir: failed to create attr '%s' in %s: %d\n",
                    dev->attrs[n].name, dev->path, ret);
             for (int i = 0; i < n; i++)
                 sysfs_remove_attr(dev->path, dev->attrs[i].name);
@@ -58,7 +59,7 @@ int sysdev_register(sysdev_t *dev) {
     if (dev->init != NULL) {
         ret = dev->init(dev);
         if (ret != 0) {
-            printk("sysdir: device init hook failed for %s: %d\n",
+            eerror("sysdir: device init hook failed for %s: %d\n",
                    dev->name, ret);
             sysdev_unregister(dev);
             return ret;
@@ -85,7 +86,7 @@ int sysdev_unregister(sysdev_t *dev) {
     dev->registered = false;
     dev->path[0]    = '\0';
 
-    printk("sysdir: unregistered %s/%s\n", dev->subsys, dev->name);
+    veinfo("sysdir: unregistered %s/%s\n", dev->subsys, dev->name);
     return 0;
 }
 
@@ -510,7 +511,7 @@ int sysdev_register_pci(void)
 
     size_t count = pci_get_device_count();
     if (count > MAX_PCI_SYSFS) {
-        printk("sysdir: %zu PCI devices, capping sysfs at %d\n",
+        ewarn("sysdir: %zu PCI devices, capping sysfs at %d\n",
                count, MAX_PCI_SYSFS);
         count = MAX_PCI_SYSFS;
     }
@@ -541,9 +542,9 @@ int sysdev_register_pci(void)
 
         ret = sysdev_register(&pci_sysfs_sysdevs[i]);
         if (ret != 0) {
-            printk("sysdir: skipping PCI device %s: %d\n",
+            ewarn("sysdir: skipping PCI device %s: %d\n",
                    pci_sysfs_names[i], ret);
-            /* Non-fatal — continue with remaining devices */
+            /* Non-fatal */
         }
     }
 
@@ -679,7 +680,7 @@ static int blk_class_register_one(struct blk_device *dev, void *data) {
     (void)data;
 
     if (blk_sysfs_count >= MAX_BLK_SYSFS) {
-        printk("sysdir: /sys/class/block: slot limit reached, skipping %s\n",
+        ewarn("sysdir: /sys/class/block: slot limit reached, skipping %s\n",
                dev->name);
         return 0; /* non-fatal — keep iterating */
     }
@@ -707,8 +708,7 @@ static int blk_class_register_one(struct blk_device *dev, void *data) {
 
     int ret = sysdev_register(&blk_sysfs_sysd[i]);
     if (ret != 0)
-        printk("sysdir: skipping block class entry %s: %d\n", dev->name, ret);
-
+        ewarn("sysdir: skipping block class entry %s: %d\n", dev->name, ret);
     blk_sysfs_count++;
     return 0;
 }
@@ -729,30 +729,30 @@ int sysdev_register_class(void) {
 int sysdir_init(void) {
     int ret;
 
+    vfs_mkdir("/bin", 0755);
+
     ret = sysdev_register_cpu();
     if (ret != 0) {
-        printk("sysdir: cpu0 registration failed: %d\n", ret);
+        eerror("sysdir: cpu0 registration failed: %d\n", ret);
         return ret;
     }
 
     ret = sysdev_register_pci();
     if (ret != 0) {
-        printk("sysdir: PCI registration failed: %d\n", ret);
+        eerror("sysdir: PCI registration failed: %d\n", ret);
         return ret;
     }
 
     ret = sysdev_register_fs();
     if (ret != 0) {
-        printk("sysdir: fs registration failed: %d\n", ret);
+        eerror("sysdir: fs registration failed: %d\n", ret);
         return ret;
     }
 
     ret = sysdev_register_class();
     if (ret != 0) {
-        printk("sysdir: class registration failed: %d\n", ret);
+        eerror("sysdir: class registration failed: %d\n", ret);
         return ret;
     }
-
-    printk("sysdir: initialized\n");
     return 0;
 }
