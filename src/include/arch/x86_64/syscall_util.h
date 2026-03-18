@@ -27,6 +27,13 @@ typedef struct {
 } __attribute__((packed)) linux_stat_t;
 
 typedef struct {
+    uint64_t d_ino;
+    int64_t  d_off;
+    uint16_t d_reclen;
+    uint8_t  d_type;
+} __attribute__((packed)) linux_dirent64_hdr_t;
+
+typedef struct {
     uint64_t sa_handler;
     uint64_t sa_flags;
     uint64_t sa_restorer;

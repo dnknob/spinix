@@ -19,11 +19,14 @@
 #define SYS_DUP2            33
 #define SYS_GETPID          39
 #define SYS_EXIT            60
+#define SYS_GETCWD          79
+#define SYS_CHDIR           80
 #define SYS_MKDIR           83
 #define SYS_RMDIR           84
 #define SYS_UNLINK          87
 #define SYS_GETTIMEOFDAY    96
 #define SYS_GETPPID         110
+#define SYS_GETDENTS64      217
 #define SYS_CLOCK_GETTIME   228
 #define SYS_EXIT_GROUP      231
 

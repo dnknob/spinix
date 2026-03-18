@@ -163,7 +163,7 @@ iso: all limine
 .PHONY: run
 run: iso
 	qemu-system-x86_64 -enable-kvm -cpu host -smp 3 -m 1G -M q35 \
-	    -drive format=raw,file=image.iso -serial stdio
+		-drive format=raw,file=image.iso -serial stdio
 
 .PHONY: clean
 clean:

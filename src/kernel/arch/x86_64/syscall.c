@@ -19,6 +19,9 @@
 #include <video/printk.h>
 #include <video/log.h>
 
+#include <klibc/string.h>
+#include <klibc/errno.h>
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -54,6 +57,10 @@ void syscall_init(void)
 #define STDIN_BUF_SIZE  512
 #define STDIN_BUF_MASK  (STDIN_BUF_SIZE - 1)
 
+#define DIRENT64_NAME_OFFSET  19u
+
+#define ALIGN8(x)  (((x) + 7u) & ~7u)
+
 static volatile char     stdin_ring[STDIN_BUF_SIZE];
 static volatile uint32_t stdin_head   = 0;
 static volatile uint32_t stdin_tail   = 0;
@@ -63,7 +70,7 @@ static volatile tcb_t   *stdin_waiter = NULL;
 static void stdin_enqueue(char c)
 {
     uint32_t next = (stdin_head + 1) & STDIN_BUF_MASK;
-    if (next == stdin_tail) return;     /* full — drop */
+    if (next == stdin_tail) return;     /* full */
     stdin_ring[stdin_head] = c;
     stdin_head = next;
 }
@@ -660,6 +667,117 @@ static int64_t sys_dup2(uint64_t oldfd, uint64_t newfd)
     return (int64_t)newfd;
 }
 
+static int64_t sys_getdents64(uint64_t fd, uint64_t buf_addr, uint64_t count)
+{
+    if (count == 0)
+        return -22LL;   /* -EINVAL */
+    if (fd <= 2 || fd >= PROC_MAX_FDS)
+        return -9LL;    /* -EBADF  */
+ 
+    if (validate_user_buf((void *)buf_addr, count) != 0)
+        return -14LL;   /* -EFAULT */
+ 
+    pcb_t *proc = proc_get_current();
+    if (proc == NULL)
+        return -9LL;
+ 
+    file_descriptor_t *fde = proc_fd_get(proc, (int)fd);
+    if (fde == NULL || fde->file == NULL)
+        return -9LL;
+ 
+    vfs_file_t *vfile = (vfs_file_t *)fde->file;
+ 
+    if (vfile->f_vnode == NULL || vfile->f_vnode->v_type != VFS_TYPE_DIR)
+        return -20LL;   /* -ENOTDIR */
+ 
+    if (vfile->f_vnode->v_ops == NULL || vfile->f_vnode->v_ops->readdir == NULL)
+        return -38LL;   /* -ENOSYS  */
+ 
+    uint8_t  *ubuf    = (uint8_t *)buf_addr;
+    uint64_t  written = 0;          /* bytes written so far into ubuf */
+ 
+    for (;;) {
+        vfs_dirent_t kd;
+        int ret = vfs_readdir(vfile, &kd);
+ 
+        if (ret == 0)
+            break;
+        if (ret < 0)
+            return (written > 0) ? (int64_t)written : (int64_t)ret;
+ 
+        size_t namelen = strlen(kd.d_name);
+        size_t reclen  = ALIGN8(DIRENT64_NAME_OFFSET + namelen + 1);
+ 
+        if (written + reclen > count) {
+            if (written == 0)
+                return -22LL;   /* -EINVAL: buffer too small for even one entry */
+
+            if (vfile->f_offset > 0)
+                vfile->f_offset--;
+ 
+            break;
+        }
+ 
+        linux_dirent64_hdr_t hdr;
+        hdr.d_ino    = kd.d_ino;
+        hdr.d_off    = (int64_t)(vfile->f_offset);  /* offset *after* this entry */
+        hdr.d_reclen = (uint16_t)reclen;
+        hdr.d_type   = kd.d_type;                   /* VFS_DT_* == DT_* values */
+ 
+        memcpy(ubuf + written, &hdr, sizeof(hdr));
+ 
+        memcpy(ubuf + written + DIRENT64_NAME_OFFSET, kd.d_name, namelen + 1);
+ 
+        size_t pad_start = DIRENT64_NAME_OFFSET + namelen + 1;
+        size_t pad_bytes = reclen - pad_start;
+        if (pad_bytes > 0)
+            memset(ubuf + written + pad_start, 0, pad_bytes);
+ 
+        written += reclen;
+    }
+ 
+    fde->offset = vfile->f_offset;
+ 
+    proc->stats.syscalls++;
+    return (int64_t)written;   /* 0 means EOF, positive means data */
+}
+
+static int64_t sys_chdir(uint64_t path_addr)
+{
+    size_t path_len = 0;
+    int vret = validate_user_str((const char *)path_addr, &path_len);
+    if (vret != 0) return (int64_t)vret;
+    if (path_len == 0) return -ENOENT;
+
+    return (int64_t)vfs_chdir((const char *)path_addr);
+}
+
+static int64_t sys_getcwd(uint64_t buf_addr, uint64_t size)
+{
+    if (buf_addr == 0 || size == 0)
+        return -EINVAL;
+
+    if (validate_user_buf((void *)buf_addr, size) != 0)
+        return -EFAULT;
+
+    pcb_t *proc = proc_get_current();
+    if (proc == NULL)
+        return -EINVAL;
+
+    const char *cwd = proc_get_cwd(proc);
+    if (cwd == NULL)
+        return -EINVAL;
+
+    size_t len = strlen(cwd) + 1;   /* include NUL terminator */
+    if (len > size)
+        return -ERANGE;
+
+    memcpy((void *)buf_addr, cwd, len);
+
+    proc->stats.syscalls++;
+    return (int64_t)len;
+}
+
 static int64_t sys_clock_gettime(uint64_t clk_id, uint64_t ts_addr)
 {
     if (validate_user_buf((void *)ts_addr, sizeof(linux_timespec_t)) != 0)
@@ -836,6 +954,9 @@ uint64_t syscall_dispatch(uint64_t num,
     case SYS_UNLINK:        return (uint64_t)sys_unlink(a1);
     case SYS_MKDIR:         return (uint64_t)sys_mkdir(a1, a2);
     case SYS_RMDIR:         return (uint64_t)sys_rmdir(a1);
+    case SYS_GETDENTS64: return (uint64_t)sys_getdents64(a1, a2, a3);
+    case SYS_CHDIR:         return (uint64_t)sys_chdir(a1);
+    case SYS_GETCWD:        return (uint64_t)sys_getcwd(a1, a2);
     case SYS_CLOCK_GETTIME: return (uint64_t)sys_clock_gettime(a1, a2);
     case SYS_GETTIMEOFDAY:  return (uint64_t)sys_gettimeofday(a1, a2);
     case SYS_RT_SIGACTION:   return (uint64_t)sys_rt_sigaction(a1, a2, a3, a4);
