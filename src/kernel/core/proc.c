@@ -883,6 +883,8 @@ void proc_reap_zombies(void) {
 
             for (int i = 0; i < PROC_MAX_FDS; i++) {
                 if (proc->fd_table[i] != NULL) {
+                    if (proc->fd_table[i]->f_path != NULL)
+                        kfree(proc->fd_table[i]->f_path);
                     kfree(proc->fd_table[i]);
                 }
             }
@@ -999,9 +1001,11 @@ void proc_fd_close(pcb_t *proc, int fd) {
     lock_scheduler();
 
     file_descriptor_t *file = proc->fd_table[fd];
-    if (file != NULL) {
+        if (file != NULL) {
         file->refcount--;
         if (file->refcount == 0) {
+            if (file->f_path != NULL)
+                kfree(file->f_path);
             kfree(file);
         }
         proc->fd_table[fd] = NULL;

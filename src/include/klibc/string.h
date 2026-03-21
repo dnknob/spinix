@@ -3,6 +3,7 @@
 #define _STRING_H
 
 size_t strlen(const char *str);
+char *strdup(const char *s);
 char *strchr(const char *s, int c);
 char *strcpy(char *dest, const char *src);
 char *strncpy(char *dest, const char *src, size_t n);

@@ -65,6 +65,7 @@ typedef struct file_descriptor {
     uint32_t flags;
     uint64_t offset;
     uint32_t refcount;
+    char    *f_path;
 } file_descriptor_t;
 
 typedef struct signal_handler {

@@ -1,7 +1,10 @@
 #include <klibc/string.h>
+#include <klibc/errno.h>
+
+#include <mm/heap.h>
+
 #include <stddef.h>
 #include <stdint.h>
-#include <klibc/errno.h>
 
 void *memcpy(void *d, const void *s, size_t c) {
 #ifdef __x86_64__
@@ -77,6 +80,19 @@ size_t strlen(const char *a) {
 		++s;
 
 	return s;
+}
+
+char *strdup(const char *s) {
+    if (s == NULL)
+        return NULL;
+
+    size_t n = strlen(s) + 1;
+    char *d = (char *)kmalloc(n);
+    if (d == NULL)
+        return NULL;
+
+    memcpy(d, s, n);
+    return d;
 }
 
 char *strchr(const char *s, int c) {

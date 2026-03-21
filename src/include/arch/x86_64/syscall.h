@@ -30,6 +30,7 @@
 #define SYS_GETDENTS64      217
 #define SYS_CLOCK_GETTIME   228
 #define SYS_EXIT_GROUP      231
+#define SYS_OPENAT          257
 
 #define MMAP_PROT_NONE      0
 #define MMAP_PROT_READ      (1 << 0)
@@ -61,6 +62,8 @@
 #define IA32_SFMASK     0xC0000084
 
 #define SA_RESTORER     0x04000000UL
+
+#define AT_FDCWD            (-100)
 
 extern uint64_t syscall_kernel_rsp;
 

@@ -53,11 +53,41 @@ override LDFLAGS += \
     --gc-sections \
     -T src/linker.lds
 
+USER_CFLAGS := \
+    -g -O2 -pipe \
+    -Wall \
+    -Wextra \
+    -std=gnu11 \
+    -ffreestanding \
+    -nostdlib \
+    -nostdinc \
+    -fno-stack-protector \
+    -fno-builtin \
+    -fno-lto \
+    -fno-PIC \
+    -ffunction-sections \
+    -fdata-sections \
+    -m64 \
+    -march=x86-64 \
+    -mabi=sysv \
+    -mno-red-zone \
+    -mno-sse \
+    -mno-sse2 \
+    -mno-mmx
+
+USER_CPPFLAGS := \
+    -I src/include \
+    -I user/libc/include \
+    -I user/include \
+    -MMD \
+    -MP
+
 USER_LDFLAGS := \
     -m elf_x86_64 \
     -static \
     -nostdlib \
-    -Ttext=0x400000
+    -Ttext=0x400000 \
+    --gc-sections
 
 override SRCFILES  := $(shell find src -type f | sort)
 override CFILES    := $(filter %.c,$(SRCFILES))
@@ -72,13 +102,18 @@ override DEPS := $(OBJ:.o=.d)
 CRT0_SRC := user/crt0.s
 CRT0_OBJ := obj/user/crt0.o
 
+LIBC_CSRC := $(shell find user/libc -name '*.c' 2>/dev/null | sort)
+LIBC_SSRC := $(shell find user/libc -name '*.s' 2>/dev/null | sort)
+LIBC_OBJS := $(addprefix obj/, $(LIBC_CSRC:.c=.c.o) $(LIBC_SSRC:.s=.s.o))
+LIBC_AR   := obj/user/libc.a
+
 USER_SFILES := $(filter-out $(CRT0_SRC), $(wildcard user/*.s))
 USER_CFILES := $(wildcard user/*.c)
 USER_S_BINS := $(patsubst user/%.s, bin/%, $(USER_SFILES))
 USER_C_BINS := $(patsubst user/%.c, bin/%, $(USER_CFILES))
 USER_BINS   := $(USER_S_BINS) $(USER_C_BINS)
 
-EMBED_OBJS := $(patsubst bin/%, obj/embed/%.o, $(USER_BINS))
+EMBED_OBJS  := $(patsubst bin/%, obj/embed/%.o, $(USER_BINS))
 
 .PHONY: all
 all: bin/$(OUTPUT)
@@ -89,21 +124,35 @@ $(CRT0_OBJ): $(CRT0_SRC)
 	mkdir -p $(dir $@)
 	$(AS) --64 $< -o $@
 
-bin/%: user/%.s $(CRT0_OBJ)
-	mkdir -p bin obj/user
-	$(AS) --64 $< -o obj/user/$*.s.o
-	$(LD) $(USER_LDFLAGS) $(CRT0_OBJ) obj/user/$*.s.o -o $@
+obj/user/libc/%.c.o: user/libc/%.c
+	mkdir -p $(dir $@)
+	$(CC) $(USER_CFLAGS) $(USER_CPPFLAGS) -c $< -o $@
+
+obj/user/libc/%.s.o: user/libc/%.s
+	mkdir -p $(dir $@)
+	$(AS) --64 $< -o $@
+
+ifneq ($(LIBC_OBJS),)
+$(LIBC_AR): $(LIBC_OBJS)
+	mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+LINK_LIBC := $(LIBC_AR)
+else
+LINK_LIBC :=
+endif
 
 obj/user/%.c.o: user/%.c
 	mkdir -p $(dir $@)
-	gcc -ffreestanding -nostdlib -nostdinc -static \
-	    -mno-red-zone -fno-stack-protector \
-	    -O2 -m64 -I user/include \
-	    -c $< -o $@
+	$(CC) $(USER_CFLAGS) $(USER_CPPFLAGS) -c $< -o $@
 
-bin/%: obj/user/%.c.o $(CRT0_OBJ)
+bin/%: user/%.s $(CRT0_OBJ) $(LINK_LIBC)
+	mkdir -p bin obj/user
+	$(AS) --64 $< -o obj/user/$*.s.o
+	$(LD) $(USER_LDFLAGS) $(CRT0_OBJ) obj/user/$*.s.o $(LINK_LIBC) -o $@
+
+bin/%: obj/user/%.c.o $(CRT0_OBJ) $(LINK_LIBC)
 	mkdir -p bin
-	$(LD) $(USER_LDFLAGS) $(CRT0_OBJ) $< -o $@
+	$(LD) $(USER_LDFLAGS) $(CRT0_OBJ) $< $(LINK_LIBC) -o $@
 
 obj/embed/%.o: bin/%
 	mkdir -p $(dir $@)
@@ -143,13 +192,13 @@ limine:
 iso: all limine
 	rm -rf iso_root
 	mkdir -p iso_root/boot/limine iso_root/EFI/BOOT
-	cp bin/$(OUTPUT)            iso_root/boot/
-	cp src/limine.conf          iso_root/boot/limine/
-	cp limine/limine-bios.sys   iso_root/boot/limine/
+	cp bin/$(OUTPUT)              iso_root/boot/
+	cp src/limine.conf            iso_root/boot/limine/
+	cp limine/limine-bios.sys     iso_root/boot/limine/
 	cp limine/limine-bios-cd.bin  iso_root/boot/limine/
 	cp limine/limine-uefi-cd.bin  iso_root/boot/limine/
-	cp limine/BOOTX64.EFI       iso_root/EFI/BOOT/
-	cp limine/BOOTIA32.EFI      iso_root/EFI/BOOT/
+	cp limine/BOOTX64.EFI         iso_root/EFI/BOOT/
+	cp limine/BOOTIA32.EFI        iso_root/EFI/BOOT/
 	xorriso -as mkisofs -R -r -J \
 	    -b boot/limine/limine-bios-cd.bin \
 	    -no-emul-boot -boot-load-size 4 -boot-info-table \
